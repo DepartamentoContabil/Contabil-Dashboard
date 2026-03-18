@@ -3,7 +3,7 @@ import {
   BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList,
 } from 'recharts';
-import { useData } from '@/hooks/useData';
+import { useData, DEFAULT_CSV_URL } from '@/hooks/useData';
 import { MESES } from '@/data/sampleData';
 import type { EmpresaRow } from '@/data/sampleData';
 
@@ -116,7 +116,7 @@ function DrillModal({ title, data, onClose, columns }: DrillModalProps) {
 }
 
 export default function Dashboard() {
-  const { data, loading, lastUpdate, loadFromURL, handleFileUpload } = useData();
+  const { data, loading, lastUpdate, error, loadFromURL, handleFileUpload } = useData();
   const [section, setSection] = useState<NavSection>('home');
   const [obrigTab, setObrigTab] = useState<ObrigTab>('ecd');
   const [drillData, setDrillData] = useState<EmpresaRow[] | null>(null);
@@ -127,7 +127,7 @@ export default function Dashboard() {
   const [filterComp, setFilterComp] = useState('');
   const [filterMes, setFilterMes] = useState('');
   const [filterSearch, setFilterSearch] = useState('');
-  const [csvUrl, setCsvUrl] = useState('');
+  const [csvUrl, setCsvUrl] = useState(DEFAULT_CSV_URL);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const empresas = data.empresas.sort((a, b) => a.empresa.localeCompare(b.empresa));
@@ -678,8 +678,9 @@ export default function Dashboard() {
             <div className="upload-zone">
               <h4>🔄 Atualizar Base de Dados</h4>
               <p>
-                Exporte a planilha como <code>.csv</code> e carregue abaixo, ou cole o link do Google Sheets publicado como CSV.<br />
-                <strong>Automatização:</strong> No Google Sheets, vá em <em>Arquivo → Compartilhar → Publicar na web → CSV</em> e cole o link gerado aqui. Para atualização semanal automática, mantenha o link sempre atualizado na planilha e clique em "Conectar".
+                A base carrega automaticamente do Google Sheets a cada abertura. Para forçar atualização, clique em <strong>Reconectar</strong>.<br />
+                Também é possível subir um arquivo <code>.csv</code> exportado da planilha.<br />
+                <strong>Dica de automação:</strong> Publique a planilha como CSV em <em>Arquivo → Compartilhar → Publicar na web → CSV</em> — o link já está configurado abaixo. Basta clicar em Reconectar sempre que quiser atualizar.
               </p>
               <div className="upload-actions">
                 <label className="btn-upload">
@@ -691,16 +692,22 @@ export default function Dashboard() {
                 </label>
                 <input
                   className="url-input"
-                  placeholder="Link CSV Google Sheets (publicado como CSV)…"
+                  placeholder="Link CSV Google Sheets…"
                   value={csvUrl}
                   onChange={e => setCsvUrl(e.target.value)}
                 />
                 <button className="btn-upload" onClick={() => csvUrl && loadFromURL(csvUrl)} disabled={loading}>
-                  {loading ? '⏳ Carregando...' : '🔗 Conectar'}
+                  {loading ? '⏳ Carregando...' : '🔄 Reconectar'}
                 </button>
               </div>
-              {lastUpdate && (
-                <p className="update-info">✅ Última atualização: {lastUpdate.toLocaleString('pt-BR')}</p>
+              {loading && (
+                <p className="update-info" style={{ color: '#d97706' }}>⏳ Buscando dados da planilha…</p>
+              )}
+              {error && (
+                <p className="update-info" style={{ color: '#dc2626' }}>❌ {error}</p>
+              )}
+              {lastUpdate && !loading && !error && (
+                <p className="update-info">✅ Base carregada do Google Sheets: {lastUpdate.toLocaleString('pt-BR')} · {data.empresas.length} empresas</p>
               )}
             </div>
           </div>

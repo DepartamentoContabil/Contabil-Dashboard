@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import Papa from 'papaparse';
 import type { EmpresaRow, EcdEcfRow, ReinfRow, ImplementacaoRow } from '@/data/sampleData';
 import {
@@ -8,11 +8,70 @@ import {
   SAMPLE_IMPLEMENTACOES,
 } from '@/data/sampleData';
 
+export const DEFAULT_CSV_URL =
+  'https://docs.google.com/spreadsheets/d/e/2PACX-1vS4SRwt-4cFsO1Tw7LSWvsKkB_8yHn1pxe0WECb1GniFGKFKHSItlxQ9fAl2T73tA_6pJuFElOx_OFv/pub?output=csv';
+
 export interface AppData {
   empresas: EmpresaRow[];
   ecdEcf: EcdEcfRow[];
   reinf: ReinfRow[];
   implementacoes: ImplementacaoRow[];
+}
+
+function normalizeDate(val: string): string {
+  if (!val) return '';
+  const m = val.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (m) return `${m[2]}.${m[3]}`;
+  return val;
+}
+
+function parseEmpresaRow(r: Record<string, string>): EmpresaRow {
+  const keys = Object.keys(r);
+
+  const get = (...searchKeys: string[]): string => {
+    for (const k of searchKeys) {
+      const found = keys.find(rk => rk.trim().toUpperCase().replace(/\s+/g, ' ') === k.trim().toUpperCase().replace(/\s+/g, ' '));
+      if (found && r[found]?.trim()) return r[found].trim();
+    }
+    for (const k of searchKeys) {
+      const found = keys.find(rk => rk.trim().toUpperCase().includes(k.trim().toUpperCase()));
+      if (found && r[found]?.trim()) return r[found].trim();
+    }
+    return '';
+  };
+
+  const fechGet = (...searchKeys: string[]): string => {
+    const v = get(...searchKeys);
+    return v ? 'X' : '';
+  };
+
+  const comp = normalizeDate(get(
+    'COMPETÊNCIA DE FECHAMENTO', 'COMPETENCIA DE FECHAMENTO', 'COMPETÊNCIA', 'COMPETENCIA'
+  ));
+
+  return {
+    cnpj: get('CNPJ'),
+    empresa: get('EMPRESAS', 'EMPRESA'),
+    codigo: get('CÓDIGO SISTEMA', 'CODIGO SISTEMA', 'COD', 'CÓDIGO'),
+    integracaoFinanceira: get(
+      'INTEGRAÇÃO FINANCEIRA', 'INTEGRACAO FINANCEIRA',
+      'TIPO DE INTEGRAÇÃO FINANCEIRA', 'TIPO DE INTEGRACAO FINANCEIRA'
+    ),
+    atividadeOperacional: get('ATIVIDADE OPERACIONAL'),
+    regimeTributario: get('REGIME TRIBUTÁRIO', 'REGIME TRIBUTARIO'),
+    folhaPagamento: get(
+      'INFORMAÇÃO DE FOLHA DE PAGAMENTO', 'INFORMACAO DE FOLHA DE PAGAMENTO',
+      'INFORMAÇÃO FOLHA', 'FOLHA'
+    ),
+    responsavel: get('RESPONSÁVEL', 'RESPONSAVEL'),
+    statusFechamento: get('STATUS DE FECHAMENTO', 'STATUS FECHAMENTO', 'STATUS'),
+    competenciaFechamento: comp,
+    fech_10_2025: fechGet('FECHAMENTOS EM 10.2025', '10.2025'),
+    fech_11_2025: fechGet('FECHAMENTOS EM 11.2025', '11.2025'),
+    fech_12_2025: fechGet('FECHAMENTOS EM 12.2025', '12.2025'),
+    fech_01_2026: fechGet('FECHAMENTOS EM 01.2026', '01.2026'),
+    fech_02_2026: fechGet('FECHAMENTOS EM 02.2026', '02.2026'),
+  };
 }
 
 export function useData() {
@@ -24,65 +83,67 @@ export function useData() {
   });
   const [loading, setLoading] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const loadFromCSV = useCallback((text: string) => {
-    const result = Papa.parse<Record<string, string>>(text, {
+  const loadFromCSVText = useCallback((text: string) => {
+    let csvText = text;
+
+    const lines = text.split('\n');
+    const headerLineIdx = lines.findIndex(line => {
+      const upper = line.toUpperCase();
+      return upper.includes('CNPJ') || upper.includes('EMPRESAS') || upper.includes('EMPRESA');
+    });
+    if (headerLineIdx > 0) {
+      csvText = lines.slice(headerLineIdx).join('\n');
+    }
+
+    const result = Papa.parse<Record<string, string>>(csvText, {
       header: true,
       skipEmptyLines: true,
     });
     if (!result.data.length) return;
 
-    const rows: EmpresaRow[] = result.data.map((r) => ({
-      cnpj: r['CNPJ'] || r['cnpj'] || '',
-      empresa: r['EMPRESA'] || r['empresa'] || r['EMPRESAS'] || '',
-      codigo: r['CÓDIGO SISTEMA'] || r['codigo'] || r['COD'] || '',
-      integracaoFinanceira: r['INTEGRAÇÃO FINANCEIRA'] || r['TIPO DE INTEGRAÇÃO FINANCEIRA'] || '',
-      atividadeOperacional: r['ATIVIDADE OPERACIONAL'] || '',
-      regimeTributario: r['REGIME TRIBUTÁRIO'] || '',
-      folhaPagamento: r['INFORMAÇÃO DE FOLHA DE PAGAMENTO'] || r['FOLHA'] || '',
-      responsavel: r['RESPONSÁVEL'] || r['RESPONSAVEL'] || '',
-      statusFechamento: r['STATUS DE FECHAMENTO'] || r['STATUS FECHAMENTO'] || '',
-      competenciaFechamento: r['COMPETÊNCIA DE FECHAMENTO'] || r['COMPETENCIA'] || '',
-      fech_10_2025: r['FECHAMENTOS EM 10.2025'] || r['10.2025'] || '',
-      fech_11_2025: r['FECHAMENTOS EM 11.2025'] || r['11.2025'] || '',
-      fech_12_2025: r['FECHAMENTOS EM 12.2025'] || r['12.2025'] || '',
-      fech_01_2026: r['FECHAMENTOS EM 01.2026'] || r['01.2026'] || '',
-      fech_02_2026: r['FECHAMENTOS EM 02.2026'] || r['02.2026'] || '',
-    }));
+    const rows: EmpresaRow[] = result.data
+      .map(parseEmpresaRow)
+      .filter(r => r.empresa || r.cnpj);
 
-    setData((prev) => ({ ...prev, empresas: rows }));
-    setLastUpdate(new Date());
+    if (rows.length > 0) {
+      setData(prev => ({ ...prev, empresas: rows }));
+      setLastUpdate(new Date());
+      setError(null);
+    }
   }, []);
 
   const loadFromURL = useCallback(async (url: string) => {
     setLoading(true);
+    setError(null);
     try {
-      let finalUrl = url;
-      if (url.includes('docs.google.com/spreadsheets')) {
-        const match = url.match(/\/d\/([^/]+)/);
-        if (match) {
-          finalUrl = `https://docs.google.com/spreadsheets/d/${match[1]}/export?format=csv`;
-        }
-      }
-      const res = await fetch(finalUrl);
+      const proxyUrl = `/api/csv-proxy?url=${encodeURIComponent(url)}`;
+      const res = await fetch(proxyUrl);
+      if (!res.ok) throw new Error(`Erro HTTP ${res.status}`);
       const text = await res.text();
-      loadFromCSV(text);
-    } catch (e) {
+      loadFromCSVText(text);
+    } catch (e: any) {
       console.error('Erro ao carregar CSV:', e);
+      setError(`Erro ao carregar planilha: ${e?.message || 'verifique o link'}`);
     } finally {
       setLoading(false);
     }
-  }, [loadFromCSV]);
+  }, [loadFromCSVText]);
 
   const handleFileUpload = useCallback((file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       if (e.target?.result) {
-        loadFromCSV(e.target.result as string);
+        loadFromCSVText(e.target.result as string);
       }
     };
     reader.readAsText(file, 'UTF-8');
-  }, [loadFromCSV]);
+  }, [loadFromCSVText]);
 
-  return { data, loading, lastUpdate, loadFromURL, handleFileUpload };
+  useEffect(() => {
+    loadFromURL(DEFAULT_CSV_URL);
+  }, []);
+
+  return { data, loading, lastUpdate, error, loadFromURL, handleFileUpload };
 }
