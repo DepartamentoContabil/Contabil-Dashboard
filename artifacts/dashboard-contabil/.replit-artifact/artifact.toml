@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Dashboard Departamento Contábil – Gestão Contadores"
+version = "1.0.0"
+id = "artifacts/dashboard-contabil"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+localPort = 20710
+name = "web"
+paths = ["/"]
+
+[services.development]
+run = "pnpm --filter @workspace/dashboard-contabil run dev"
+
+[services.env]
+PORT = "20710"
+BASE_PATH = "/"
+
+[services.production]
+build = ["pnpm", "--filter", "@workspace/dashboard-contabil", "run", "build"]
+publicDir = "artifacts/dashboard-contabil/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
